@@ -28,13 +28,12 @@
   <p id="status"></p>
 
 <script>
+// ...existing code...
+
 const qp = new URLSearchParams(location.search);
+const BACKEND = (qp.get('backend') || 'http://localhost:8081/pickcolor').trim();
 
-// backend URL is provided by the bot when opening the picker (query param `backend`).
-// Fallback: try localhost:8081 (useful for local development).
-const BACKEND = (qp.get('backend') || 'http://localhost:8081/pickcolor').replace(/\s+/g,'');
-
-// Read required params from URL (bot should include them)
+// read params passed by bot
 const CHAT_ID = qp.get('chatID') || '';
 const COLLAB_ID = qp.get('collabID') || '';
 const CRON_ID = qp.get('cronID') || '';
@@ -49,7 +48,6 @@ function parseHex(h){
       255
     ];
   }
-  // support #RGB short form
   if(h.length === 4){
     return [
       parseInt(h[1]+h[1],16),
@@ -61,67 +59,49 @@ function parseHex(h){
   return null;
 }
 
-function rgbaString(r,g,b,a){
-  return `rgba(${r}, ${g}, ${b}, ${(a/255).toFixed(2)})`;
-}
-
 async function sendColor(){
   const colorHex = document.getElementById('picker').value;
   const statusEl = document.getElementById('status');
 
-  // If the bot didn't pass params, show instructions and abort.
   if(!CHAT_ID || !COLLAB_ID || !CRON_ID){
-    statusEl.innerText = 'Missing chatID / collabID / cronID. The bot should include them in the picker URL.';
+    statusEl.innerText = 'Missing chatID/collabID/cronID in URL. The bot should include them.';
     return;
   }
-
   const rgba = parseHex(colorHex);
   if(!rgba){
     statusEl.innerText = 'Invalid color';
     return;
   }
 
-  statusEl.innerText = `Sending ${rgbaString(...rgba)}...`;
-
-  const payload = {
-    chatID: CHAT_ID,
-    collabID: COLLAB_ID,
-    cronID: CRON_ID,
-    color: colorHex
-  };
+  statusEl.innerText = `Sending ${colorHex} to ${BACKEND}...`;
 
   try {
     const res = await fetch(BACKEND, {
       method: 'POST',
       mode: 'cors',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({
+        chatID: CHAT_ID,
+        collabID: COLLAB_ID,
+        cronID: CRON_ID,
+        color: colorHex
+      })
     });
     const txt = await res.text();
     if(res.ok){
-      statusEl.innerText = `Sent: ${rgbaString(...rgba)} — Telegram preview should appear shortly.`;
-      // optional: close the popup after a short delay
-      setTimeout(()=>{ try { window.close(); } catch(e){} }, 1300);
+      statusEl.innerText = `Sent ${colorHex}. Telegram preview should appear shortly.`;
+      setTimeout(()=>{ try{ window.close() } catch(e){} }, 1200);
     } else {
-      statusEl.innerText = `Error: ${txt || res.statusText}`;
+      statusEl.innerText = `Server error: ${txt || res.statusText}`;
+      console.warn('pickcolor response:', res.status, txt);
     }
   } catch(err){
-    console.error(err);
-    statusEl.innerText = 'Network error sending color';
+    console.error('Network sendColor error:', err);
+    statusEl.innerText = 'Network error sending color — see console / network tab for details.';
   }
 }
 
 document.getElementById('sendBtn').addEventListener('click', sendColor);
-
-// small UX: if required params missing, expose them for debugging (but keep hidden)
-(function init(){
-  if(!CHAT_ID || !COLLAB_ID || !CRON_ID){
-    document.getElementById('hint').innerText = 'Missing params in URL. For quick testing you can add ?chatID=...&collabID=...&cronID=...&backend=...';
-  } else {
-    // hide hint (not necessary) and make UI minimal
-    document.getElementById('hint').innerText = 'Ready — color will be sent directly to the bot.';
-  }
-})();
 </script>
 </body>
 </html>
