@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -8,21 +8,14 @@
   body{font-family: Arial, Helvetica, sans-serif; text-align:center; padding:40px;}
   #picker{width:120px;height:120px;border:0;background:none}
   button{padding:10px 18px;font-size:16px}
-  input[type=text]{width:260px;padding:8px;font-size:14px}
+  .muted{color:#666;font-size:13px}
+  #status{margin-top:12px}
 </style>
 </head>
 <body>
   <h2>Pick a color for collaborator</h2>
 
-  <p>
-    <label>Chat ID: <input id="chatID" type="text" placeholder="Telegram chat ID (you can prefill in URL)"></label>
-  </p>
-  <p>
-    <label>cronID: <input id="cronID" type="text" placeholder="cronID (from button callback)"></label>
-  </p>
-  <p>
-    <label>collabID: <input id="collabID" type="text" placeholder="collabID (from button callback)"></label>
-  </p>
+  <p class="muted" id="hint">This page expects chatID, collabID and cronID passed in the URL (the bot attaches them automatically).</p>
 
   <p>
     <input id="picker" type="color" value="#0078ff">
@@ -35,20 +28,20 @@
   <p id="status"></p>
 
 <script>
-// Backend endpoint (change to your public endpoint if not running on same host/port)
-const DEFAULT_BACKEND = location.origin.replace(/:\d+$/, '') + (location.port ? ':' + location.port : '') + '/pickcolor';
-// If you host the Go pickcolor server on a different origin, set BACKEND_URL here.
-const BACKEND_URL = (function(){
-  // prefer explicit query param backend
-  const qp = new URLSearchParams(location.search);
-  if (qp.get('backend')) return qp.get('backend');
-  // default to same origin + port 8081 if not present
-  return DEFAULT_BACKEND.replace(/:80\/?$/, ':8081') ;
-})();
+const qp = new URLSearchParams(location.search);
 
-function parseHex(h) {
-  if (!h || h[0] !== '#') return null;
-  if (h.length === 7) {
+// backend URL is provided by the bot when opening the picker (query param `backend`).
+// Fallback: try localhost:8081 (useful for local development).
+const BACKEND = (qp.get('backend') || 'http://localhost:8081/pickcolor').replace(/\s+/g,'');
+
+// Read required params from URL (bot should include them)
+const CHAT_ID = qp.get('chatID') || '';
+const COLLAB_ID = qp.get('collabID') || '';
+const CRON_ID = qp.get('cronID') || '';
+
+function parseHex(h){
+  if(!h || h[0] !== '#') return null;
+  if(h.length === 7){
     return [
       parseInt(h.substr(1,2),16),
       parseInt(h.substr(3,2),16),
@@ -56,61 +49,79 @@ function parseHex(h) {
       255
     ];
   }
+  // support #RGB short form
+  if(h.length === 4){
+    return [
+      parseInt(h[1]+h[1],16),
+      parseInt(h[2]+h[2],16),
+      parseInt(h[3]+h[3],16),
+      255
+    ];
+  }
   return null;
 }
 
 function rgbaString(r,g,b,a){
-  return `rgba(${r},${g},${b},${a/255})`;
+  return `rgba(${r}, ${g}, ${b}, ${(a/255).toFixed(2)})`;
 }
 
-function sendColor(){
+async function sendColor(){
   const colorHex = document.getElementById('picker').value;
-  const chatID = (document.getElementById('chatID').value || '').trim();
-  const collabID = (document.getElementById('collabID').value || '').trim();
-  const cronID = (document.getElementById('cronID').value || '').trim();
+  const statusEl = document.getElementById('status');
 
-  if (!chatID || !collabID || !cronID) {
-    document.getElementById('status').innerText = 'Please fill chatID, collabID and cronID (you can pass them in the URL).';
+  // If the bot didn't pass params, show instructions and abort.
+  if(!CHAT_ID || !COLLAB_ID || !CRON_ID){
+    statusEl.innerText = 'Missing chatID / collabID / cronID. The bot should include them in the picker URL.';
     return;
   }
 
   const rgba = parseHex(colorHex);
   if(!rgba){
-    document.getElementById('status').innerText = 'Invalid color';
+    statusEl.innerText = 'Invalid color';
     return;
   }
 
-  // color param: use hex (easiest) — backend supports hex or rgba()
-  const url = new URL(BACKEND_URL);
-  url.searchParams.set('chatID', chatID);
-  url.searchParams.set('collabID', collabID);
-  url.searchParams.set('cronID', cronID);
-  url.searchParams.set('color', colorHex); // backend parses hex
+  statusEl.innerText = `Sending ${rgbaString(...rgba)}...`;
 
-  fetch(url.toString(), { method: 'GET', mode: 'cors' })
-    .then(async res => {
-      const txt = await res.text();
-      if (res.ok) {
-        document.getElementById('status').innerText = [Color sent: ${rgbaString(...rgba)}](http://_vscodecontentref_/0);
-      } else {
-        document.getElementById('status').innerText = `Error: ${txt || res.statusText}`;
-      }
-    })
-    .catch(err => {
-      console.error(err);
-      document.getElementById('status').innerText = 'Network error sending color';
+  const payload = {
+    chatID: CHAT_ID,
+    collabID: COLLAB_ID,
+    cronID: CRON_ID,
+    color: colorHex
+  };
+
+  try {
+    const res = await fetch(BACKEND, {
+      method: 'POST',
+      mode: 'cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
     });
+    const txt = await res.text();
+    if(res.ok){
+      statusEl.innerText = `Sent: ${rgbaString(...rgba)} — Telegram preview should appear shortly.`;
+      // optional: close the popup after a short delay
+      setTimeout(()=>{ try { window.close(); } catch(e){} }, 1300);
+    } else {
+      statusEl.innerText = `Error: ${txt || res.statusText}`;
+    }
+  } catch(err){
+    console.error(err);
+    statusEl.innerText = 'Network error sending color';
+  }
 }
 
-// Pre-fill fields from URL query params (so you can call the picker with ?chatID=...&collabID=...&cronID=...)
-(function initFromQuery(){
-  const qp = new URLSearchParams(location.search);
-  if (qp.get('chatID')) document.getElementById('chatID').value = qp.get('chatID');
-  if (qp.get('collabID')) document.getElementById('collabID').value = qp.get('collabID');
-  if (qp.get('cronID')) document.getElementById('cronID').value = qp.get('cronID');
-})();
-
 document.getElementById('sendBtn').addEventListener('click', sendColor);
+
+// small UX: if required params missing, expose them for debugging (but keep hidden)
+(function init(){
+  if(!CHAT_ID || !COLLAB_ID || !CRON_ID){
+    document.getElementById('hint').innerText = 'Missing params in URL. For quick testing you can add ?chatID=...&collabID=...&cronID=...&backend=...';
+  } else {
+    // hide hint (not necessary) and make UI minimal
+    document.getElementById('hint').innerText = 'Ready — color will be sent directly to the bot.';
+  }
+})();
 </script>
 </body>
 </html>
