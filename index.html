@@ -1,37 +1,116 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Telegram Bot Color Picker</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Telegram Color Picker</title>
+<style>
+  body{font-family: Arial, Helvetica, sans-serif; text-align:center; padding:40px;}
+  #picker{width:120px;height:120px;border:0;background:none}
+  button{padding:10px 18px;font-size:16px}
+  input[type=text]{width:260px;padding:8px;font-size:14px}
+</style>
 </head>
-<body style="font-family: sans-serif; text-align: center; margin-top: 50px;">
-<h2>Pick a color for your Telegram bot</h2>
-<input type="color" id="picker" style="width:100px; height:100px;">
-<p>
-<button onclick="sendColor()" style="padding:10px 20px; font-size:16px;">Send Color</button>
-</p>
-<p id="status"></p>
+<body>
+  <h2>Pick a color for collaborator</h2>
+
+  <p>
+    <label>Chat ID: <input id="chatID" type="text" placeholder="Telegram chat ID (you can prefill in URL)"></label>
+  </p>
+  <p>
+    <label>cronID: <input id="cronID" type="text" placeholder="cronID (from button callback)"></label>
+  </p>
+  <p>
+    <label>collabID: <input id="collabID" type="text" placeholder="collabID (from button callback)"></label>
+  </p>
+
+  <p>
+    <input id="picker" type="color" value="#0078ff">
+  </p>
+
+  <p>
+    <button id="sendBtn">Send Color</button>
+  </p>
+
+  <p id="status"></p>
 
 <script>
-function sendColor() {
-    const color = document.getElementById('picker').value; // hex, e.g. #FF00FF
-    const chatID = prompt("Enter your Telegram chat ID"); // for demo, you can embed it in the URL later
-    if (!chatID) return;
-    
-    // Send the color back to your Go backend (replace with your bot URL)
-    const url = `https://your-bot-backend.com/pickcolor?chatID=${chatID}&color=${color}`;
-    
-    fetch(url)
-        .then(res => res.text())
-        .then(txt => {
-            document.getElementById('status').innerText = `Color sent: ${color}`;
-        })
-        .catch(err => {
-            document.getElementById('status').innerText = 'Failed to send color';
-            console.error(err);
-        });
+// Backend endpoint (change to your public endpoint if not running on same host/port)
+const DEFAULT_BACKEND = location.origin.replace(/:\d+$/, '') + (location.port ? ':' + location.port : '') + '/pickcolor';
+// If you host the Go pickcolor server on a different origin, set BACKEND_URL here.
+const BACKEND_URL = (function(){
+  // prefer explicit query param backend
+  const qp = new URLSearchParams(location.search);
+  if (qp.get('backend')) return qp.get('backend');
+  // default to same origin + port 8081 if not present
+  return DEFAULT_BACKEND.replace(/:80\/?$/, ':8081') ;
+})();
+
+function parseHex(h) {
+  if (!h || h[0] !== '#') return null;
+  if (h.length === 7) {
+    return [
+      parseInt(h.substr(1,2),16),
+      parseInt(h.substr(3,2),16),
+      parseInt(h.substr(5,2),16),
+      255
+    ];
+  }
+  return null;
 }
+
+function rgbaString(r,g,b,a){
+  return `rgba(${r},${g},${b},${a/255})`;
+}
+
+function sendColor(){
+  const colorHex = document.getElementById('picker').value;
+  const chatID = (document.getElementById('chatID').value || '').trim();
+  const collabID = (document.getElementById('collabID').value || '').trim();
+  const cronID = (document.getElementById('cronID').value || '').trim();
+
+  if (!chatID || !collabID || !cronID) {
+    document.getElementById('status').innerText = 'Please fill chatID, collabID and cronID (you can pass them in the URL).';
+    return;
+  }
+
+  const rgba = parseHex(colorHex);
+  if(!rgba){
+    document.getElementById('status').innerText = 'Invalid color';
+    return;
+  }
+
+  // color param: use hex (easiest) — backend supports hex or rgba()
+  const url = new URL(BACKEND_URL);
+  url.searchParams.set('chatID', chatID);
+  url.searchParams.set('collabID', collabID);
+  url.searchParams.set('cronID', cronID);
+  url.searchParams.set('color', colorHex); // backend parses hex
+
+  fetch(url.toString(), { method: 'GET', mode: 'cors' })
+    .then(async res => {
+      const txt = await res.text();
+      if (res.ok) {
+        document.getElementById('status').innerText = [Color sent: ${rgbaString(...rgba)}](http://_vscodecontentref_/0);
+      } else {
+        document.getElementById('status').innerText = `Error: ${txt || res.statusText}`;
+      }
+    })
+    .catch(err => {
+      console.error(err);
+      document.getElementById('status').innerText = 'Network error sending color';
+    });
+}
+
+// Pre-fill fields from URL query params (so you can call the picker with ?chatID=...&collabID=...&cronID=...)
+(function initFromQuery(){
+  const qp = new URLSearchParams(location.search);
+  if (qp.get('chatID')) document.getElementById('chatID').value = qp.get('chatID');
+  if (qp.get('collabID')) document.getElementById('collabID').value = qp.get('collabID');
+  if (qp.get('cronID')) document.getElementById('cronID').value = qp.get('cronID');
+})();
+
+document.getElementById('sendBtn').addEventListener('click', sendColor);
 </script>
 </body>
 </html>
